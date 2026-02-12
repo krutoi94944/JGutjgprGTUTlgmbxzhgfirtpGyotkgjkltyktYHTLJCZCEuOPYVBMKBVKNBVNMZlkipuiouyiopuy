@@ -13,12 +13,12 @@ from aiogram.types import Message, FSInputFile, BufferedInputFile
 from aiogram.enums import ParseMode
 
 # ============================================
-# НАСТРОЙКИ - ЗАПОЛНИТЕ ЭТИ ПЕРЕМЕННЫЕ
+# НАСТРОЙКИ - ТОЛЬКО ЭТО НУЖНО ИЗМЕНИТЬ!
 # ============================================
-BOT_TOKEN = "8478108815:AAEhrJnxYB-RoGJYK7S2RxO_nE9dwkgQhIg"  # Вставьте ваш токен сюда
-DEOBFUSCATOR_PATH = "/app/Prometheus-Deobfuscator/pol.py"  # Путь к pol.py
-PYTHON_PATH = "python"  # или "python3" на Linux/Mac
-TEMP_DIR = "temp_files"  # Папка для временных файлов
+BOT_TOKEN = "8478108815:AAEhrJnxYB-RoGJYK7S2RxO_nE9dwkgQhIg"  # Вставьте ваш токен от @BotFather
+DEOBFUSCATOR_PATH = "/app/Prometheus-Deobfuscator/pol.py"  # ПРАВИЛЬНЫЙ ПУТЬ
+PYTHON_PATH = "python3"  # На Linux всегда python3
+TEMP_DIR = "/app/bot_temp"  # Папка для временных файлов
 
 # ============================================
 # ИНИЦИАЛИЗАЦИЯ БОТА
@@ -28,7 +28,23 @@ dp = Dispatcher()
 
 # Создаем временную папку, если её нет
 os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(os.path.dirname(DEOBFUSCATOR_PATH), exist_ok=True)
 
+# ============================================
+# ПРОВЕРКА ДЕОБФУСКАТОРА ПРИ ЗАПУСКЕ
+# ============================================
+async def check_deobfuscator():
+    """Проверяет доступность деобфускатора при запуске"""
+    if not os.path.exists(DEOBFUSCATOR_PATH):
+        print(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Деобфускатор не найден по пути: {DEOBFUSCATOR_PATH}")
+        print("🔍 Пожалуйста, проверьте:")
+        print("   1. Что репозиторий склонирован: git clone https://github.com/0x251/Prometheus-Deobfuscator.git")
+        print("   2. Что путь указан правильно: /app/Prometheus-Deobfuscator/pol.py")
+        print("   3. Что файл существует: ls -la /app/Prometheus-Deobfuscator/pol.py")
+        return False
+    else:
+        print(f"✅ Деобфускатор найден: {DEOBFUSCATOR_PATH}")
+        return True
 
 # ============================================
 # ФУНКЦИЯ ДЕОБФУСКАЦИИ
@@ -36,24 +52,27 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 async def deobfuscate_lua(input_code: str, filename: str = "script.lua") -> Optional[str]:
     """
     Запускает Prometheus Deobfuscator на полученном Lua коде
-    Возвращает деобфусцированный код или None в случае ошибки
+    Возвращает деобфусцированный код или текст ошибки
     """
     
     # Создаем уникальные имена для файлов
-    input_file = os.path.join(TEMP_DIR, f"input_{filename}")
-    output_file = os.path.join(TEMP_DIR, f"output_{filename}")
+    import uuid
+    unique_id = str(uuid.uuid4())[:8]
+    input_file = os.path.join(TEMP_DIR, f"input_{unique_id}_{filename}")
+    output_file = os.path.join(TEMP_DIR, f"output_{unique_id}_{filename}")
     
     try:
         # Сохраняем входной код во временный файл
         with open(input_file, "w", encoding="utf-8") as f:
             f.write(input_code)
         
+        print(f"📄 Файл сохранен: {input_file}")
+        
         # Запускаем деобфускатор
         process = await asyncio.create_subprocess_exec(
             PYTHON_PATH,
             DEOBFUSCATOR_PATH,
             input_file,
-            "--output", output_file,  # Некоторые версии поддерживают этот флаг
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -65,25 +84,27 @@ async def deobfuscate_lua(input_code: str, filename: str = "script.lua") -> Opti
             process.kill()
             return "❌ Ошибка: Превышено время выполнения (30 секунд)"
         
-        if process.returncode != 0:
-            error_msg = stderr.decode('utf-8', errors='ignore')
-            return f"❌ Ошибка деобфускации:\n```\n{error_msg[:500]}\n```"
+        # Декодируем вывод
+        stdout_text = stdout.decode('utf-8', errors='ignore')
+        stderr_text = stderr.decode('utf-8', errors='ignore')
         
-        # Проверяем, создался ли выходной файл
-        if os.path.exists(output_file):
-            with open(output_file, "r", encoding="utf-8") as f:
-                result = f.read()
-            return result
-        else:
-            # Если выходной файл не создан, пробуем найти результат в stdout
-            stdout_text = stdout.decode('utf-8', errors='ignore')
-            if stdout_text:
-                return stdout_text
+        print(f"✅ Деобфускация завершена, код возврата: {process.returncode}")
+        
+        if process.returncode != 0:
+            if stderr_text:
+                return f"❌ Ошибка деобфускации:\n```\n{stderr_text[:500]}\n```"
             else:
-                return "❌ Ошибка: Не удалось получить деобфусцированный код"
+                return "❌ Ошибка деобфускации (неизвестная ошибка)"
+        
+        # Проверяем, есть ли результат в stdout
+        if stdout_text and len(stdout_text.strip()) > 0:
+            return stdout_text
+        else:
+            return "❌ Ошибка: Деобфускатор не вернул результат"
     
     except Exception as e:
-        return f"❌ Исключение: {str(e)}"
+        print(f"❌ Исключение: {str(e)}")
+        return f"❌ Исключение: {str(e)[:200]}"
     
     finally:
         # Очищаем временные файлы
@@ -91,9 +112,9 @@ async def deobfuscate_lua(input_code: str, filename: str = "script.lua") -> Opti
             try:
                 if os.path.exists(file):
                     os.remove(file)
+                    print(f"🧹 Удален: {file}")
             except:
                 pass
-
 
 # ============================================
 # ОБРАБОТЧИКИ КОМАНД
@@ -104,18 +125,17 @@ async def cmd_start(message: Message):
     """Приветственное сообщение"""
     await message.answer(
         "🤖 <b>Prometheus Deobfuscator Bot</b>\n\n"
-        "Отправьте мне Lua-файл с обфусцированным кодом, и я попробую его деобфусцировать!\n\n"
-        "📁 <b>Поддерживаемые обфускаторы:</b>\n"
+        "📁 <b>Отправьте Lua-файл</b> с обфусцированным кодом, и я попробую его деобфусцировать!\n\n"
+        "🔧 <b>Поддерживаемые обфускаторы:</b>\n"
         "• Prometheus Obfuscator\n"
         "• Moonsec V2/V3\n"
-        "• Другие обфускаторы с похожей структурой\n\n"
+        "• MoonSec\n\n"
         "⚡ <b>Команды:</b>\n"
         "/start - Показать это сообщение\n"
         "/help - Подробная справка\n"
         "/status - Проверить статус сервера",
         parse_mode=ParseMode.HTML
     )
-
 
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
@@ -131,7 +151,6 @@ async def cmd_help(message: Message):
 ⚠️ <b>Ограничения:</b>
 • Максимальный размер файла: 20 MB
 • Максимальное время обработки: 30 секунд
-• Некоторые сложные обфускации могут потребовать ручного вмешательства
 
 🔧 <b>Что умеет деобфускатор:</b>
 • Расшифровка строк
@@ -141,12 +160,11 @@ async def cmd_help(message: Message):
 • Декодирование Base64/Hex/Decimal
 
 ❓ <b>Если не работает:</b>
-• Убедитесь, что файл действительно обфусцирован Prometheus/Moonsec
-• Попробуйте пересохранить файл в UTF-8 без BOM
-• Свяжитесь с разработчиком @username
+• Убедитесь, что файл обфусцирован Prometheus/Moonsec
+• Проверьте кодировку файла (UTF-8)
+• Используйте команду /status для проверки бота
 """
     await message.answer(help_text, parse_mode=ParseMode.HTML)
-
 
 @dp.message(Command("status"))
 async def cmd_status(message: Message):
@@ -155,30 +173,46 @@ async def cmd_status(message: Message):
         # Проверяем существует ли файл деобфускатора
         if not os.path.exists(DEOBFUSCATOR_PATH):
             await message.answer(
-                "❌ <b>Деобфускатор не найден!</b>\n\n"
+                f"❌ <b>Деобфускатор не найден!</b>\n\n"
                 f"Путь: <code>{DEOBFUSCATOR_PATH}</code>\n\n"
-                "Убедитесь, что вы указали правильный путь в коде бота.",
+                f"📋 <b>Что делать:</b>\n"
+                f"1. Подключитесь к серверу по SSH\n"
+                f"2. Выполните: <code>ls -la /app/Prometheus-Deobfuscator/</code>\n"
+                f"3. Убедитесь, что файл pol.py существует\n"
+                f"4. Если репозиторий не склонирован:\n"
+                f"   <code>cd /app && git clone https://github.com/0x251/Prometheus-Deobfuscator.git</code>",
                 parse_mode=ParseMode.HTML
             )
             return
         
-        # Проверяем можем ли запустить Python
+        # Проверяем права на выполнение
+        is_executable = os.access(DEOBFUSCATOR_PATH, os.X_OK)
+        
+        # Проверяем Python
         process = await asyncio.create_subprocess_exec(
             PYTHON_PATH, "--version",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
         stdout, _ = await process.communicate()
-        python_version = stdout.decode().strip()
+        python_version = stdout.decode().strip() or "Python 3.x"
         
-        await message.answer(
-            "✅ <b>Статус: Бот работает корректно</b>\n\n"
-            f"🐍 Python: {python_version}\n"
-            f"📁 Деобфускатор: {Path(DEOBFUSCATOR_PATH).name}\n"
-            f"📊 Временная папка: {TEMP_DIR}\n"
-            "🟢 Готов к работе!",
-            parse_mode=ParseMode.HTML
+        # Проверяем временную папку
+        temp_writable = os.access(TEMP_DIR, os.W_OK) if os.path.exists(TEMP_DIR) else False
+        
+        status_text = (
+            f"✅ <b>Бот работает</b>\n\n"
+            f"📁 <b>Деобфускатор:</b>\n"
+            f"  • Путь: <code>{DEOBFUSCATOR_PATH}</code>\n"
+            f"  • Статус: {'🟢 Найден' if os.path.exists(DEOBFUSCATOR_PATH) else '🔴 Не найден'}\n"
+            f"  • Права: {'✅ OK' if is_executable else '⚠️ Нет прав на выполнение'}\n\n"
+            f"🐍 <b>Python:</b> {python_version}\n\n"
+            f"📂 <b>Временная папка:</b>\n"
+            f"  • Путь: <code>{TEMP_DIR}</code>\n"
+            f"  • Статус: {'🟢 Готова' if temp_writable else '🔴 Нет доступа'}\n"
         )
+        
+        await message.answer(status_text, parse_mode=ParseMode.HTML)
         
     except Exception as e:
         await message.answer(
@@ -186,13 +220,13 @@ async def cmd_status(message: Message):
             parse_mode=ParseMode.HTML
         )
 
-
 @dp.message(lambda message: message.document)
 async def handle_document(message: Message):
     """Обработка загруженных файлов"""
     
-    # Проверяем расширение файла
     file_name = message.document.file_name or "script.lua"
+    
+    # Проверяем расширение файла
     if not file_name.lower().endswith('.lua'):
         await message.reply(
             "❌ Пожалуйста, отправьте файл с расширением <code>.lua</code>",
@@ -207,7 +241,7 @@ async def handle_document(message: Message):
     
     # Отправляем статус
     status_msg = await message.reply(
-        "⏳ <b>Загрузка файла...</b>",
+        f"📥 <b>Загрузка файла:</b> {file_name}",
         parse_mode=ParseMode.HTML
     )
     
@@ -219,8 +253,10 @@ async def handle_document(message: Message):
         
         # Обновляем статус
         await status_msg.edit_text(
-            "🔄 <b>Запуск деобфускации...</b>\n"
-            "Это может занять до 30 секунд.",
+            f"🔄 <b>Деобфускация...</b>\n"
+            f"Файл: {file_name}\n"
+            f"Размер: {len(lua_code)} символов\n\n"
+            f"⏳ Это может занять до 30 секунд",
             parse_mode=ParseMode.HTML
         )
         
@@ -237,7 +273,7 @@ async def handle_document(message: Message):
             return
         
         # Если результат слишком длинный, отправляем файлом
-        if len(result) > 4000:
+        if len(result) > 3500:
             output_filename = f"deobfuscated_{file_name}"
             output_path = os.path.join(TEMP_DIR, output_filename)
             
@@ -246,19 +282,20 @@ async def handle_document(message: Message):
             
             await message.reply_document(
                 document=FSInputFile(output_path),
-                caption="✅ <b>Деобфускация завершена!</b>".format(file_name),
+                caption=f"✅ <b>Деобфускация завершена!</b>\n\nИсходный файл: {file_name}",
                 parse_mode=ParseMode.HTML
             )
             
             # Удаляем временный файл
-            os.remove(output_path)
-            
+            try:
+                os.remove(output_path)
+            except:
+                pass
         else:
             # Отправляем как текст
             await message.reply(
                 f"✅ <b>Деобфускация завершена!</b>\n\n"
-                f"<pre><code class='language-lua'>{result[:3500]}</code></pre>\n"
-                f"{'...' if len(result) > 3500 else ''}",
+                f"<pre><code class='language-lua'>{result}</code></pre>",
                 parse_mode=ParseMode.HTML
             )
         
@@ -272,34 +309,44 @@ async def handle_document(message: Message):
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка обработки: {str(e)[:200]}")
 
-
 @dp.message()
 async def handle_text(message: Message):
     """Обработка текстовых сообщений"""
-    if message.text and message.text.strip().startswith("--"):
-        # Если сообщение начинается с комментария Lua, возможно это код
-        await message.reply(
-            "📁 Пожалуйста, отправьте код как <b>файл</b> с расширением .lua\n"
-            "Это гарантирует правильную обработку кодировки.",
-            parse_mode=ParseMode.HTML
-        )
-    else:
-        await message.reply(
-            "Отправьте Lua-файл для деобфускации или используйте /help"
-        )
-
+    await message.reply(
+        "📁 Отправьте <b>.lua файл</b> для деобфускации\n"
+        "Или используйте /help для получения справки",
+        parse_mode=ParseMode.HTML
+    )
 
 # ============================================
 # ЗАПУСК БОТА
 # ============================================
 async def main():
-    print("🤖 Бот запускается...")
+    print("=" * 50)
+    print("🤖 ЗАПУСК PROMETHEUS DEOBFUSCATOR BOT")
+    print("=" * 50)
+    
+    # Проверяем деобфускатор
+    deobfuscator_ok = await check_deobfuscator()
+    
+    if not deobfuscator_ok:
+        print("\n⚠️  Бот запущен, но деобфускатор не найден!")
+        print("   Команда /status покажет подробную информацию\n")
+    else:
+        print("\n✅ Бот готов к работе!\n")
+    
     print(f"📁 Путь к деобфускатору: {DEOBFUSCATOR_PATH}")
     print(f"🐍 Python: {PYTHON_PATH}")
-    print("✅ Бот готов к работе! Нажмите Ctrl+C для остановки.")
+    print(f"📂 Временная папка: {TEMP_DIR}")
+    print("\n🟢 Бот запущен! Нажмите Ctrl+C для остановки.")
+    print("=" * 50)
     
     await dp.start_polling(bot)
 
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n\n👋 Бот остановлен")
+    except Exception as e:
+        print(f"\n❌ Критическая ошибка: {e}")
