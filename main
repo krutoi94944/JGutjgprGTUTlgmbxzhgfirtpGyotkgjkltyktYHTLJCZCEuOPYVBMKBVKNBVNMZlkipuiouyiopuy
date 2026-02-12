@@ -16,7 +16,7 @@ from aiogram.enums import ParseMode
 # НАСТРОЙКИ - ЗАПОЛНИТЕ ЭТИ ПЕРЕМЕННЫЕ
 # ============================================
 BOT_TOKEN = "8478108815:AAEhrJnxYB-RoGJYK7S2RxO_nE9dwkgQhIg"  # Вставьте ваш токен сюда
-DEOBFUSCATOR_PATH = "C:/Users/User/Prometheus-Deobfuscator/pol.py"  # Путь к pol.py
+DEOBFUSCATOR_PATH = "/app/Prometheus-Deobfuscator/pol.py"  # Путь к pol.py
 PYTHON_PATH = "python"  # или "python3" на Linux/Mac
 TEMP_DIR = "temp_files"  # Папка для временных файлов
 
